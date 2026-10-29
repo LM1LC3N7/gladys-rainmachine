@@ -167,3 +167,14 @@ up to date at the end of every milestone.
   and starts stop before), `/data` unreadable in `trust` (the save of a
   first pin fails then), the watch of a late start set before the stop's
   byte (set again in every `beforeSend`).
+
+## Next patch
+
+- r3 m1: two fixes have no test that catches their removal: the shorter wait before the read back
+  (`src/app.js:2411`; with the full 500 ms, "5 starts at 500 ms" drops to 0/5 confirmed, s8b) and the reset of
+  the dry-read count on a full read (`src/app.js:2344`; "Stop all" could be lifted by two non-consecutive dry
+  reads).
+- r3 m2: the TLS fallback checks the error code after the 40-character cap of `code()` (`src/http.js:91`), so
+  `ERR_SSL_UNSAFE_LEGACY_RENEGOTIATION_DISABLED` never triggers it (minor: a TLS 1.0-only controller first
+  answers with the version alert).
+- r3 m3: the "24 mutants, all killed" line above is out of date (r3: 50 mutants, 38 killed, 10 equivalent).
