@@ -213,6 +213,8 @@ export class RainMachineApp {
     this.memory = normalizeMemory(null, now());
     /** /data could not be read: never overwritten (a guess would lose what it holds). */
     this.memoryUnreadable = false;
+    /** /data loaded (or found unreadable): before, nothing is pinned, sent with a secret nor saved. */
+    this.memoryReady = false;
     this.memoryLoaded = undefined;
     this.controller = freshController();
     this.generation = 0;
@@ -339,9 +341,11 @@ export class RainMachineApp {
             'RainMachine: /data/rainmachine-state.json cannot be read: it is never overwritten',
           );
           this.memory = normalizeMemory(null, now);
+          this.memoryReady = true;
           return;
         }
         this.memory = normalizeMemory(result?.data ?? null, now);
+        this.memoryReady = true;
         if (this.memory.pause) {
           this.pausedUntil = Math.max(
             this.pausedUntil,
@@ -356,13 +360,19 @@ export class RainMachineApp {
           guard.resends = kept.resends;
           this.stopGuards.set(kept.key, guard);
         }
+        if (this.stopGuards.size > 0) {
+          // A stop clicked while /data loaded is kept with the others now.
+          this.persistStops().catch(() => {});
+          this.armStopCheck(0);
+        }
       })();
     }
     return this.memoryLoaded;
   }
 
   async saveMemory() {
-    if (this.memoryUnreadable) {
+    // Unreadable: never overwritten. Not loaded yet: never overwritten with a guess.
+    if (this.memoryUnreadable || !this.memoryReady) {
       return false;
     }
     // Bounded: a hung disk never holds a read, a configuration nor a stop.
@@ -754,9 +764,10 @@ export class RainMachineApp {
    * Another one is refused, and kept for "Trust the new certificate".
    */
   async trust(fingerprint, target, { legacy = false } = {}) {
-    if (this.memoryUnreadable) {
-      // The pin is unknown: nothing is sent (a guess could send the password to an impostor).
-      throw new ControllerError(ERROR_KINDS.STORAGE, '/data unreadable', { notSent: true });
+    if (this.memoryUnreadable || !this.memoryReady) {
+      // The pin is unknown (unreadable, or not loaded yet): nothing is sent (a
+      // guess could send the password to an impostor).
+      throw new ControllerError(ERROR_KINDS.STORAGE, '/data not read', { notSent: true });
     }
     const pin = this.pinOf(target);
     if (pin && pin.fingerprint !== fingerprint) {
@@ -841,8 +852,8 @@ export class RainMachineApp {
           this.loggedIn(key);
         },
       });
-      // The time one exchange takes (a read back is only tried when it fits).
-      this.exchangeMs = (this.mono() - started) / (1 + logins);
+      // The time one read takes (a read back is only tried when it fits).
+      if (method === 'GET') this.exchangeMs = (this.mono() - started) / (1 + logins);
       return result;
     } catch (err) {
       if (err?.kind === ERROR_KINDS.AUTH) {
@@ -1375,6 +1386,7 @@ export class RainMachineApp {
       }
       return T.stopStates.notSent;
     }
+    if (guard.kind === 'all' && guard.programsUnread) return T.stopStates.programsUnread;
     if (guard.resends >= TIMINGS.stopResends) return T.stopStates.held;
     return T.stopStates.notApplied(guard.resends);
   }
@@ -1429,6 +1441,9 @@ export class RainMachineApp {
     }
     if (this.memoryUnreadable) {
       return [false, this.withNotes(T.dataUnreadable)];
+    }
+    if (!this.memoryReady) {
+      return [false, this.withNotes(T.dataLoading)];
     }
     const refused = this.memory.refusedPin;
     if (refused && sameAddress(refused, this.config.address)) {
@@ -2326,9 +2341,18 @@ export class RainMachineApp {
       const program = read.programs.get(guard.uid);
       applied = !program || program.status === RUN_STATES.NOT_RUNNING;
     } else if (guard.kind === 'all' && read?.zones && read?.programs) {
+      guard.dryReads = 0;
+      guard.programsUnread = false;
       applied =
         [...read.zones.values()].every(zoneDry) &&
         [...read.programs.values()].every((p) => p.status === RUN_STATES.NOT_RUNNING);
+    } else if (guard.kind === 'all' && read?.zones) {
+      // The programs cannot be read: let go only by two reads in a row showing
+      // every zone dry (none watering nor queued), never by one, never by time.
+      guard.programsUnread = true;
+      const dry = [...read.zones.values()].every(zoneDry);
+      guard.dryReads = dry ? (guard.dryReads ?? 0) + 1 : 0;
+      applied = guard.dryReads >= 2;
     }
     if (applied) {
       guard.applied = true;
@@ -2618,7 +2642,12 @@ export class RainMachineApp {
     }
     read.zones = await get(PATHS.zones, parseZones);
     if (withPrograms) {
-      read.programs = await get(PATHS.programs, parsePrograms);
+      // Programs unreadable: the zones still decide what they can (src decideStop).
+      try {
+        read.programs = await get(PATHS.programs, parsePrograms);
+      } catch (err) {
+        if (err.kind === ERROR_KINDS.ABORTED) throw err;
+      }
     }
     return read;
   }

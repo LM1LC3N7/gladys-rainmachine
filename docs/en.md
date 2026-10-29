@@ -51,7 +51,8 @@ before the password leaves). If it changes later (controller reset or
 replaced), nothing is sent to it, the status shows the new fingerprint, and
 the **Trust the new certificate** button takes it in two clicks (3 s to
 5 min apart). The connection is modern TLS (1.2 or later). Only when a
-controller refuses it at its **first** connection (a first generation only
+controller refuses it at its **first** connection with a TLS alert (a reset
+or a cut never counts) (a first generation only
 speaks TLS 1.0 with old RSA ciphers) is the legacy handshake used (TLS 1.0,
 security level 0, legacy renegotiation, as regenmaschine does), and the pin
 remembers it: a controller pinned in modern TLS is never spoken to in legacy
@@ -90,8 +91,9 @@ which):
   the other, then one read back for all; on a slow controller (900 ms an
   exchange) the fifth leaves about 4.5 s after the click, and its answer says
   "sent, without confirmation";
-- **`/data` cannot be read** (the pin is unknown) or the first pin cannot be
-  saved: nothing is sent, tried again every 15 s.
+- **`/data` cannot be read, or is still being read** after a restart (the
+  pin is unknown), or the first pin cannot be saved: nothing is sent (not the
+  password either), tried again every 15 s and once /data is read.
 
 It is refused unsent only when no address of a controller is known at all,
 or when the last read showed another controller (another MAC address) at
@@ -134,7 +136,8 @@ successive columns starts them all.
 Also refused: an inactive zone, a zone the controller no longer has, another
 controller at the address, during a 429/5xx pause, with a refused password,
 before the configuration is read, while a stop is on its way, while **Stop
-all** is kept (until a read shows every zone and program stopped), or while a
+all** is kept (until a read shows every zone and program stopped; when the
+programs cannot be read, two reads in a row of every zone dry), or while a
 stop of that zone has not left yet.
 
 ## Water used (guarded)

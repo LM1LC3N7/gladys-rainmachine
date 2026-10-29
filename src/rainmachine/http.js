@@ -331,9 +331,11 @@ export function openConnection({ host, port, timeoutMs, onSocket, legacy = false
       settled = true;
       clearTimeout(timer);
       socket.destroy();
+      // A refusal of the TLS version or ciphers (an OpenSSL alert), never a cut
+      // or a reset: only that lets the legacy handshake be tried.
       reject(
         new ControllerError(ERROR_KINDS.UNREACHABLE, `Unreachable: ${code(err)}`, {
-          handshake: connected,
+          handshake: connected && /^ERR_SSL_/.test(code(err)),
         }),
       );
     });

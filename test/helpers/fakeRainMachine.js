@@ -92,6 +92,8 @@ export function fakeRainMachine({ timers = globalThis, latencyMs = 0, applyDelay
     startDelayMs: 0,
     /** A write answered that long after it arrived (the request already received). */
     writeDelayMs: 0,
+    /** Latency of one 'METHOD path' (ms), else latencyMs: `(method, path) => number | undefined`. */
+    latencyFor: undefined,
     /** Awaited during the handshake of each exchange: `(method, path) => Promise`. */
     duringHandshake: undefined,
     /** Called with each write as it arrives: `(write) => void`. */
@@ -246,7 +248,7 @@ export function fakeRainMachine({ timers = globalThis, latencyMs = 0, applyDelay
         await delay(0, h);
         throw new ControllerError(ERROR_KINDS.UNREACHABLE, 'Unreachable: ECONNREFUSED');
       }
-      await delay(dev.latencyMs, h);
+      await delay(dev.latencyFor?.(method, path.split('?')[0]) ?? dev.latencyMs, h);
       // During the handshake (before the bytes of the request): the test may act.
       await dev.duringHandshake?.(method, path.split('?')[0]);
       await trust(dev.fingerprint);

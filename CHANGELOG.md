@@ -37,3 +37,6 @@ the notes of the version's GitHub Release.
   kept); stops clicked together are all written first, then read back once;
   modern TLS first, the legacy handshake only for a controller that refuses it
   at its first connection (kept with the pin).
+- Review r2: nothing pinned nor sent while /data is still being read;
+  "Stop all" let go by two reads of every zone dry when the programs cannot
+  be read; the TLS fallback only on a TLS alert.

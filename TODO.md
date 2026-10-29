@@ -51,6 +51,24 @@ up to date at the end of every milestone.
 
 ## Decisions
 
+- **Review r2 (2026-10-29)**:
+  - B3: until /data is loaded, `trust()` refuses (no pin learnt, nothing
+    sent, no secret) and `saveMemory()` writes nothing; the status says /data
+    is being read; a stop clicked meanwhile is kept and checked once it is
+    loaded (`armStopCheck(0)` at the end of the load).
+  - I1: a test for the guard `protectSeq` of `checkCommand` (a start waiting
+    for the line behind a stop answered with a refusal).
+  - m1: "Stop all" while the programs cannot be read is let go by two reads
+    in a row showing every zone dry (never by one, never by time); said in
+    the status. The read back of the stops keeps the zones when the programs
+    fail.
+  - m2: the legacy TLS fallback only on an OpenSSL alert (`ERR_SSL_*`), never
+    on a reset or a cut.
+  - m3: tests for the 2 s bound of the saves, the shorter wait of the read
+    back (the wait estimated from the last read, not a write), the status
+    before the configuration. The reviewer's mutants "trust before load"
+    (the save of a first pin also refuses before the load) are equivalent.
+
 - **Review r1 (2026-10-29)**:
   - B1: every save to /data is bounded (2 s, `saveWait`); a read applies the
     stops before its saves; `start()` never waits for the read of the previous
@@ -80,7 +98,8 @@ up to date at the end of every milestone.
     address says it waits for the same MAC at the new address. m5: docs.
     m6: a zone already queued is confirmed only by its remaining time equal
     to the length written.
-  - Mutants (24, the review's and the corrections'): all killed.
+  - Mutants (24, mine on the corrections): all killed by the suite then; the
+    review r2 found 4 more surviving (I1 and m3 of r2), killed since.
 
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag

@@ -55,7 +55,8 @@ remplacé), rien ne lui est envoyé, le statut affiche la nouvelle empreinte,
 et le bouton **Faire confiance au nouveau certificat** la prend en deux clics
 (à 3 s à 5 min d'intervalle). La connexion est en TLS moderne (1.2 ou plus).
 C'est seulement quand un programmateur le refuse à sa **première**
-connexion (une première génération ne parle que TLS 1.0 avec de vieilles
+connexion par une alerte TLS (une remise à zéro ou une coupure ne compte
+jamais) (une première génération ne parle que TLS 1.0 avec de vieilles
 suites TLS RSA) que la poignée de main ancienne est utilisée (TLS 1.0,
 niveau de sécurité 0, renégociation ancienne, comme regenmaschine), et
 l'épingle s'en souvient : un programmateur épinglé en TLS moderne n'est plus
@@ -97,8 +98,10 @@ statut de l'intégration dit lequel) :
   l'un après l'autre, puis une seule relecture pour tous ; sur un
   programmateur lent (900 ms par échange), le cinquième part environ 4,5 s
   après le clic, et sa réponse dit « envoyé, sans confirmation » ;
-- **`/data` est illisible** (l'épingle est inconnue) ou la première épingle
-  ne peut pas être gardée : rien n'est envoyé, nouvel essai toutes les 15 s.
+- **`/data` est illisible, ou encore en lecture** après un redémarrage
+  (l'épingle est inconnue), ou la première épingle ne peut pas être gardée :
+  rien n'est envoyé (pas le mot de passe non plus), nouvel essai toutes les
+  15 s et dès que /data est lu.
 
 Il n'est refusé sans envoi que si aucune adresse de programmateur n'est
 connue, ou si la dernière lecture a montré un autre programmateur (une autre
@@ -145,7 +148,8 @@ Refusé aussi : une zone inactive, une zone que le programmateur n'a plus, un
 autre programmateur à l'adresse, pendant une pause 429/5xx, avec un mot de
 passe refusé, avant la lecture de la configuration, pendant un arrêt en cours, tant que
 **Arrêter tout l'arrosage** est gardé (jusqu'à ce qu'une lecture montre
-toutes les zones et programmes arrêtés), ou tant qu'un arrêt de cette zone
+toutes les zones et programmes arrêtés ; quand les programmes sont
+illisibles, deux lectures de suite de toutes les zones à l'arrêt), ou tant qu'un arrêt de cette zone
 n'est pas encore parti.
 
 ## Eau utilisée (gardée)

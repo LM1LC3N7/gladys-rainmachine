@@ -92,6 +92,10 @@ export const T = {
     '/data cannot be read: the pinned certificate is unknown, nothing is sent to the controller. Check the volume of the integration.',
     "/data est illisible : le certificat épinglé est inconnu, rien n'est envoyé au programmateur. Vérifiez le volume de l'intégration.",
   ),
+  dataLoading: both(
+    '/data is still being read: nothing is sent to the controller before its pinned certificate is known.',
+    "/data est encore en lecture : rien n'est envoyé au programmateur avant que son certificat épinglé soit connu.",
+  ),
   pinNotSaved: both(
     'The certificate of the controller could not be kept in /data: nothing sent (the password leaves only once its certificate is pinned).',
     "Le certificat du programmateur n'a pas pu être gardé dans /data : rien envoyé (le mot de passe ne part qu'une fois son certificat épinglé).",
@@ -184,6 +188,10 @@ export const T = {
         `sent, not seen applied yet: checked every 15 s (sent again ${resends}/3)`,
         `envoyé, pas encore vu appliqué : vérifié toutes les 15 s (renvoyé ${resends}/3)`,
       ),
+    programsUnread: both(
+      'sent; the programs cannot be read: let go once two reads in a row show every zone dry (starts refused until then)',
+      "envoyé ; les programmes sont illisibles : levé dès que deux lectures de suite montrent toutes les zones à l'arrêt (démarrages refusés jusque-là)",
+    ),
     held: both(
       'sent 4 times, still not applied: no more sent until a new click; check the controller',
       "envoyé 4 fois, toujours pas appliqué : plus d'envoi avant un nouveau clic ; vérifiez le programmateur",
