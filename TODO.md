@@ -43,13 +43,44 @@ up to date at the end of every milestone.
   both).
 - `remaining` while queued; `flowSensorWateringClicks` after a reset of the
   sensor (the guard holds the drop).
-- A first generation controller: TLS 1.0 at security level 0 with Node 24's
-  OpenSSL; `restrictions/currently` answering `statusCode` 13 (read as absent,
+- A first generation controller: the fallback to TLS 1.0 at security level 0
+  with legacy renegotiation, with Node 24's OpenSSL; `restrictions/currently` answering `statusCode` 13 (read as absent,
   tried again hourly).
 - The certificate of a controller across a firmware update (a new
   certificate means two clicks for the user).
 
 ## Decisions
+
+- **Review r1 (2026-10-29)**:
+  - B1: every save to /data is bounded (2 s, `saveWait`); a read applies the
+    stops before its saves; `start()` never waits for the read of the previous
+    configuration nor for its own first read; the check of the stops is
+    started (not awaited) at a new configuration and after a login, and armed
+    again when it is idle; the retry of `getConfig()` is armed before /data
+    is read.
+  - B2: a start lets go only the stop of its own zone, once that stop left;
+    a start is refused while "Stop all" is kept (a read alone lets it go) or
+    while a stop of its zone has not left.
+  - I1: the stops clicked together (and those clicked meanwhile) are all
+    written first, one turn on the line, then one read back; each write may
+    take until the answer of its click (4.3 s), never cut at 3 s.
+  - I2: tests for a resend answered 503 or cut (not counted), the floor
+    after an accepted drop, the option turned off during the handshake of the
+    write, the bounded save of a lifted refusal (B1 test).
+  - m1: the read back waits less when the answer nears (twice the last
+    exchange kept for the read), and is skipped when it cannot fit; numbers
+    of a scene documented (5 zones at 500 ms: all confirmed in 4.1 s; at
+    900 ms: 2 written, 3 "nothing sent").
+  - m2: modern TLS (1.2+) first; the legacy handshake (TLS 1.0, SECLEVEL 0,
+    `SSL_OP_LEGACY_SERVER_CONNECT`) only when a controller refuses it at its
+    first connection; the pin keeps which (`legacy`), a controller pinned
+    modern is never spoken to in legacy TLS; documented with the risk.
+  - m3: the status before the configuration never says "enter the address";
+    "could not be read" while `getConfig()` fails. m4: a stop kept for another
+    address says it waits for the same MAC at the new address. m5: docs.
+    m6: a zone already queued is confirmed only by its remaining time equal
+    to the length written.
+  - Mutants (24, the review's and the corrections'): all killed.
 
 - **Version 0.1.0 set by hand** in `package.json`, `package-lock.json`, the
   manifest and the `docker_image` tag

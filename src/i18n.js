@@ -105,6 +105,10 @@ export const T = {
     'The configuration could not be read from Gladys: tried again every 30 s.',
     "La configuration n'a pas pu être lue depuis Gladys : nouvel essai toutes les 30 s.",
   ),
+  waitingConfig: both(
+    'Waiting for the configuration from Gladys.',
+    'En attente de la configuration de Gladys.',
+  ),
   connecting: both('Connecting to the controller...', 'Connexion au programmateur...'),
   connected: (summary) => both(`Connected: ${summary.en}`, `Connecté : ${summary.fr}`),
   summary: ({ name, zones, watering }) =>
@@ -155,6 +159,10 @@ export const T = {
     program: (name) => both(`Stop of program ${name}`, `Arrêt du programme ${name}`),
   },
   stopStates: {
+    otherAddress: both(
+      'kept, not sent yet: it was clicked for another address; it leaves once a read shows the same controller (same MAC address) at the address configured',
+      "gardé, pas encore parti : il a été cliqué pour une autre adresse ; il part dès qu'une lecture montre le même programmateur (même adresse MAC) à l'adresse configurée",
+    ),
     noPassword: both(
       'kept, not sent yet: it leaves once Gladys gives the password',
       'gardé, pas encore parti : il part dès que Gladys donne le mot de passe',
@@ -249,6 +257,14 @@ export const ERRORS = {
   notReadYet: both(
     'The configuration is not read yet: nothing sent.',
     "La configuration n'est pas encore lue : rien envoyé.",
+  ),
+  stopAllKept: both(
+    '"Stop all" is kept (not seen applied yet): no start until a read shows every zone and program stopped. Nothing sent.',
+    "« Arrêter tout l'arrosage » est gardé (pas encore vu appliqué) : aucun démarrage avant qu'une lecture montre toutes les zones et programmes arrêtés. Rien envoyé.",
+  ),
+  stopZoneKept: both(
+    'A stop of this zone has not left yet: no start before it. Nothing sent.',
+    "Un arrêt de cette zone n'est pas encore parti : aucun démarrage avant lui. Rien envoyé.",
   ),
   stopMeanwhile: both(
     'A stop was clicked meanwhile: the start is not sent.',

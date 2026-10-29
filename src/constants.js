@@ -171,6 +171,8 @@ export const TIMINGS = {
   /** The stop: tried again every 250 ms until 3 s after the click. */
   stopRetry: 250,
   stopRetryFor: 3_000,
+  /** Any save to /data is waited for this long at most (a hung disk never holds anything). */
+  saveWait: 2 * SECOND,
   /** The stop waits at most this long for /data (a failing disk never holds it). */
   stopSaveWait: 200,
   /** The first pin waits at most this long for /data before the password leaves. */

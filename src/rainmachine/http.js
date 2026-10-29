@@ -10,11 +10,13 @@
 // caller checked it against the pin (`trust`, src/app.js): the password and
 // the access token never reach another device, and no byte of an answer is
 // read before (an impostor writing first is never parsed).
-// `rejectUnauthorized: false` is safe only with that check. The first
-// generation of RainMachine only speaks old TLS with RSA ciphers
-// (regenmaschine loosens its context the same way): TLS 1.0 at least and the
-// cipher list at security level 0; the pin, not an authority, vouches for the
-// controller.
+// `rejectUnauthorized: false` is safe only with that check. TLS 1.2 at least
+// with the default ciphers; the first generation of RainMachine only speaks
+// old TLS with RSA ciphers (regenmaschine loosens its context the same way:
+// TLS 1.0, security level 0, legacy renegotiation): that "legacy" handshake
+// is tried only when a modern one fails at the first connection to an
+// address, and the pin keeps which one the controller took, so a controller
+// pinned modern is never spoken to in legacy TLS afterwards.
 //
 // Bounded: the time of the whole exchange, the size of the status line and
 // the headers (8 KB), of the body (64 KB). The answer is parsed in one pass
@@ -26,6 +28,7 @@
 // -----------------------------------------------------------------------------
 
 import { isIP } from 'node:net';
+import { constants as cryptoConstants } from 'node:crypto';
 import tls from 'node:tls';
 import { LIMITS } from '../constants.js';
 
@@ -271,7 +274,7 @@ export class AnswerParser {
  * byte the controller writes before a request is ever parsed.
  * @param {{ host: string, port: number, timeoutMs: number }} options
  */
-export function openConnection({ host, port, timeoutMs, onSocket }) {
+export function openConnection({ host, port, timeoutMs, onSocket, legacy = false }) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let socket;
@@ -305,20 +308,34 @@ export function openConnection({ host, port, timeoutMs, onSocket }) {
         port,
         servername: isIP(host) ? undefined : host,
         rejectUnauthorized: false,
-        minVersion: 'TLSv1',
-        ciphers: 'DEFAULT:@SECLEVEL=0',
+        ...(legacy
+          ? {
+              minVersion: 'TLSv1',
+              ciphers: 'DEFAULT:@SECLEVEL=0',
+              secureOptions: cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT,
+            }
+          : { minVersion: 'TLSv1.2' }),
       });
     } catch (err) {
       clearTimeout(timer);
       reject(new ControllerError(ERROR_KINDS.UNREACHABLE, `Unreachable: ${code(err)}`));
       return;
     }
+    // The TCP connection was accepted: a failure now is the TLS handshake.
+    let connected = false;
+    socket.once('connect', () => {
+      connected = true;
+    });
     socket.once('error', (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       socket.destroy();
-      reject(new ControllerError(ERROR_KINDS.UNREACHABLE, `Unreachable: ${code(err)}`));
+      reject(
+        new ControllerError(ERROR_KINDS.UNREACHABLE, `Unreachable: ${code(err)}`, {
+          handshake: connected,
+        }),
+      );
     });
     socket.once('secureConnect', () => {
       if (settled) return;
@@ -330,7 +347,9 @@ export function openConnection({ host, port, timeoutMs, onSocket }) {
         reject(new ControllerError(ERROR_KINDS.CERTIFICATE, 'No certificate', { notSent: true }));
         return;
       }
-      resolve(connectionOn(socket, host, fingerprint));
+      const connection = connectionOn(socket, host, fingerprint);
+      connection.legacy = legacy;
+      resolve(connection);
     });
   });
 }
@@ -461,7 +480,15 @@ export function connectionOn(socket, host, fingerprint) {
  * connection closed. `onOpen(connection)` lets the app give it up (a stop).
  * The whole exchange ends within `timeoutMs`.
  */
-export async function exchange({ host, port, timeoutMs, trust, onOpen, ...request }) {
+export async function exchange({
+  host,
+  port,
+  timeoutMs,
+  trust,
+  onOpen,
+  tls: mode = 'auto',
+  ...request
+}) {
   const started = performance.now();
   const left = () => timeoutMs - (performance.now() - started);
   // The handle the app may close from the first moment (the TCP and TLS
@@ -479,20 +506,30 @@ export async function exchange({ host, port, timeoutMs, trust, onOpen, ...reques
   if (handle.closed) {
     throw new ControllerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
   }
-  const connection = await openConnection({
-    host,
-    port,
-    timeoutMs: Math.max(1, left()),
-    onSocket: (fn) => {
-      abort = fn;
-    },
-  });
+  const open = (legacy) =>
+    openConnection({
+      host,
+      port,
+      legacy,
+      timeoutMs: Math.max(1, left()),
+      onSocket: (fn) => {
+        abort = fn;
+      },
+    });
+  let connection;
+  try {
+    connection = await open(mode === 'legacy');
+  } catch (err) {
+    // 'auto' (no pin yet): a modern handshake refused, then the legacy one, once.
+    if (mode !== 'auto' || !err.handshake || handle.closed || left() <= 0) throw err;
+    connection = await open(true);
+  }
   abort = () => connection.close();
   try {
     if (handle.closed || connection.closed) {
       throw new ControllerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
     }
-    await trust(connection.fingerprint);
+    await trust(connection.fingerprint, { legacy: connection.legacy });
     if (connection.closed) {
       throw new ControllerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
     }

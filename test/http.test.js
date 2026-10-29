@@ -261,3 +261,28 @@ test('the answer parser: chunked, interim answers, bounded head', () => {
     /Head too large/,
   );
 });
+
+test('bytes the controller writes before the request are never read as its answer', async (t) => {
+  const tls = await import('node:tls');
+  const server = tls.createServer({ key: certs.device.key, cert: certs.device.cert }, (socket) => {
+    socket.write('HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{"forged":"answer!"}');
+    socket.on('data', () => {
+      socket.end('HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n{"real":1} ');
+    });
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const res = await exchange({
+    host: '127.0.0.1',
+    port: server.address().port,
+    timeoutMs: 3_000,
+    trust: async () => {
+      // The forged bytes arrive meanwhile.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    },
+    method: 'GET',
+    path: '/api/4/zone',
+  });
+  assert.equal(res.body.trim(), '{"real":1}');
+});

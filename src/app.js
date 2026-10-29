@@ -12,7 +12,9 @@
 // read, its write, its read back), a stop, the check of the stops.
 //
 // The certificate: pinned at the first connection to an address (in /data
-// before the password leaves; a pin that cannot be saved sends nothing).
+// before the password leaves; a pin that cannot be saved sends nothing),
+// with the handshake it took (modern TLS, or legacy only for a controller
+// that refused modern TLS at that first connection).
 // Another certificate is never learnt by itself: nothing is sent to it, its
 // fingerprint is shown, and two clicks of "Trust the new certificate" take it.
 //
@@ -44,7 +46,8 @@
 //     right before the write (in `beforeSend`, nothing in between);
 //   - decided on a fresh read (identity, the zone, its state), never on the
 //     state in memory; refused when a value it needs is missing, when the
-//     zone is inactive, or while a stop is on its way;
+//     zone is inactive, while a stop is on its way, while "Stop all" is kept,
+//     or while a stop of that zone has not left;
 //   - the length is the configured minutes, bounded 1 to 60 here again: the
 //     controller ends the run by itself;
 //   - the write leaves by 3.5 s after the click or not at all; answered by
@@ -57,11 +60,13 @@
 // never held back by the option, a read or a command in progress (they end
 // them), a failed read, a 429 or 5xx pause, a configuration saved, a
 // controller never read. A start that arrived before a stop and has not left
-// gives way. Tried again every 250 ms for 3 s; not seen applied, a stop is
+// gives way. The stops clicked together are all written first, then read
+// back once. Tried again every 250 ms for 3 s; not seen applied, a stop is
 // kept in /data and checked every 15 s: sent again while the zone (the
 // program, any zone) still waters (3 times at most once the controller
 // accepted it, then held and said in the status), let go when the read shows
-// it applied, or when a start of that zone clicked in Gladys after it left.
+// it applied, or (the stop of a zone only) when a start of that zone clicked
+// in Gladys after it left.
 // Never by time; a try only counts when the controller accepted the write.
 // The only cases a stop does not leave at once (kept, said in the status, and
 // sent as soon as it can): no password known yet (a restart before Gladys
@@ -223,6 +228,10 @@ export class RainMachineApp {
     this.loginClickAt = -Infinity;
     /** Monotonic time of the last read sent (never sooner than the interval). */
     this.lastAttemptAt = -Infinity;
+    /** `getConfig()` failed (said in the status until the configuration is read). */
+    this.configFailed = false;
+    /** Milliseconds the last exchange took (a read back is tried only when it fits). */
+    this.exchangeMs = undefined;
     this.attemptSavedAt = -Infinity;
     this.lastStatus = undefined;
     this.published = undefined;
@@ -356,13 +365,22 @@ export class RainMachineApp {
     if (this.memoryUnreadable) {
       return false;
     }
-    try {
-      await this.store.save(this.memory);
-      return true;
-    } catch (err) {
-      this.logger.warn(`RainMachine: saving the state to /data failed: ${err.message}`);
+    // Bounded: a hung disk never holds a read, a configuration nor a stop.
+    const saved = await this.bounded(
+      this.store.save(this.memory).then(
+        () => true,
+        (err) => {
+          this.logger.warn(`RainMachine: saving the state to /data failed: ${err.message}`);
+          return false;
+        },
+      ),
+      TIMINGS.saveWait,
+    );
+    if (!saved.done) {
+      this.logger.warn('RainMachine: saving the state to /data takes too long: not awaited');
       return false;
     }
+    return saved.value === true;
   }
 
   /** The stops not seen applied, in /data. */
@@ -411,8 +429,9 @@ export class RainMachineApp {
     this.stop();
     this.config = normalizeConfig(raw);
     const generation = this.generation;
-    await this.controller.running;
-    await this.loadMemory();
+    // The read of the previous configuration is aborted (stop()) and ignored by
+    // its generation: never waited for (it may be stuck on a hung disk).
+    await this.bounded(this.loadMemory(), TIMINGS.saveWait);
     if (generation !== this.generation) {
       return;
     }
@@ -434,11 +453,8 @@ export class RainMachineApp {
     this.publisher.start();
     if (this.stopGuards.size > 0) {
       // The configuration (and its password) is known now: the stops kept go
-      // first, before any read.
-      await this.runCheck();
-      if (generation !== this.generation) {
-        return;
-      }
+      // first (the check takes the line before any read), never awaited.
+      this.runCheck().catch((err) => this.logger.warn(`RainMachine: check: ${err.message}`));
     }
     if (!this.config.address || this.config.badPassword || !this.config.password) {
       await this.publishAll();
@@ -454,7 +470,9 @@ export class RainMachineApp {
       await this.publishAll();
       return;
     }
-    await this.tick();
+    // The first read is not awaited: a configuration saved next is never held
+    // behind it (a read may wait for a slow controller or disk).
+    this.tick().catch((err) => this.logger.error(`RainMachine refresh failed: ${err.message}`));
   }
 
   /** The wait before the first read after a container start, from the time kept in /data. */
@@ -528,15 +546,18 @@ export class RainMachineApp {
       raw = await getConfig();
     } catch (err) {
       this.logger.warn(`RainMachine: reading the configuration failed: ${err.message}`);
-      await this.loadMemory();
-      this.lastStatus = undefined;
-      await this.setStatus(false, this.withNotes(T.configUnreadable));
+      // The next try armed first: nothing below may hold it back.
       this.configTimer = this.timers.setTimeout(() => {
         this.configTimer = undefined;
         this.onConnected(getConfig).catch(() => {});
       }, TIMINGS.configRetry);
+      this.configFailed = true;
+      await this.bounded(this.loadMemory(), TIMINGS.saveWait);
+      this.lastStatus = undefined;
+      await this.setStatus(false, this.status()[1]);
       return;
     }
+    this.configFailed = false;
     await this.inOrder(() => this.connected(seq !== this.configSeq ? this.savedRaw : raw));
   }
 
@@ -622,6 +643,7 @@ export class RainMachineApp {
 
   async applyConfig(raw) {
     this.configRead = true;
+    this.configFailed = false;
     await this.liftBlockOnNewPassword(raw);
     if (!this.started || this.needsRestart(raw)) {
       this.started = true;
@@ -709,6 +731,17 @@ export class RainMachineApp {
     await this.saveMemory();
   }
 
+  /**
+   * The TLS handshake for an address: the one its pin was taken with
+   * ('legacy' only for a controller that took nothing else at its first
+   * connection), 'auto' before the first pin (modern, then legacy once).
+   */
+  tlsFor(target) {
+    const pin = this.pinOf(target);
+    if (!pin) return 'auto';
+    return pin.legacy ? 'legacy' : 'modern';
+  }
+
   /** The pin of an address, or undefined. */
   pinOf(target) {
     return this.memory.pins?.find((p) => sameAddress(p, target));
@@ -720,7 +753,7 @@ export class RainMachineApp {
    * /data before the password leaves; 1 s at most, else nothing is sent).
    * Another one is refused, and kept for "Trust the new certificate".
    */
-  async trust(fingerprint, target) {
+  async trust(fingerprint, target, { legacy = false } = {}) {
     if (this.memoryUnreadable) {
       // The pin is unknown: nothing is sent (a guess could send the password to an impostor).
       throw new ControllerError(ERROR_KINDS.STORAGE, '/data unreadable', { notSent: true });
@@ -729,7 +762,7 @@ export class RainMachineApp {
     if (pin && pin.fingerprint !== fingerprint) {
       const refused = this.memory.refusedPin;
       if (!refused || refused.fingerprint !== fingerprint || !sameAddress(refused, target)) {
-        this.memory.refusedPin = { host: target.host, port: target.port, fingerprint };
+        this.memory.refusedPin = { host: target.host, port: target.port, fingerprint, legacy };
         this.logger.warn('RainMachine: the certificate of the controller changed, nothing sent');
         this.saveMemory().catch(() => {});
       }
@@ -751,7 +784,7 @@ export class RainMachineApp {
     const previous = this.memory.pins;
     this.memory.pins = [
       ...pins.slice(-(MAX_PINS - 1)),
-      { host: target.host, port: target.port, fingerprint },
+      { host: target.host, port: target.port, fingerprint, legacy },
     ];
     // The first pin must be in /data before the password leaves: otherwise a
     // restart would trust whatever answers next.
@@ -787,12 +820,15 @@ export class RainMachineApp {
       }
       this.loginClickAt = this.mono();
     }
+    const started = this.mono();
+    let logins = 0;
     try {
-      return await this.client.call({
+      const result = await this.client.call({
         address: target,
         password,
         key,
-        trust: (fingerprint) => this.trust(fingerprint, target),
+        trust: (fingerprint, info) => this.trust(fingerprint, target, info),
+        tls: this.tlsFor(target),
         method,
         path,
         body,
@@ -800,8 +836,14 @@ export class RainMachineApp {
         now: () => this.mono(),
         signal,
         beforeSend,
-        onLogin: () => this.loggedIn(key),
+        onLogin: () => {
+          logins += 1;
+          this.loggedIn(key);
+        },
       });
+      // The time one exchange takes (a read back is only tried when it fits).
+      this.exchangeMs = (this.mono() - started) / (1 + logins);
+      return result;
     } catch (err) {
       if (err?.kind === ERROR_KINDS.AUTH) {
         // Never awaited here: a hung disk never holds a stop on the line.
@@ -889,12 +931,13 @@ export class RainMachineApp {
         this.logger.debug('RainMachine: read begun before a write, not applied');
       } else {
         this.applyRead(read, startedAt);
-        await this.saveTarget();
-        await this.evaluateCounter();
+        // The stops first: a slow disk never delays them (the saves are bounded too).
         this.observeStops(
           { mac: read.mac, zones: read.zones, programs: read.values.programs },
           startedAt,
         );
+        await this.saveTarget();
+        await this.evaluateCounter();
       }
     } catch (err) {
       if (generation !== this.generation) {
@@ -1289,7 +1332,7 @@ export class RainMachineApp {
     const previous = this.memory.pins;
     this.memory.pins = [
       ...(this.memory.pins ?? []).filter((p) => !sameAddress(p, target)),
-      { ...target, fingerprint: refused.fingerprint },
+      { ...target, fingerprint: refused.fingerprint, legacy: refused.legacy === true },
     ].slice(-MAX_PINS);
     this.memory.refusedPin = null;
     if (!(await this.saveMemory())) {
@@ -1320,7 +1363,10 @@ export class RainMachineApp {
   /** Where a stop kept stands, for the status. */
   stopState(guard) {
     if (!guard.written) {
-      if (!this.config.password || !sameAddress(guard.target, this.config.address)) {
+      if (this.config.address && !sameAddress(guard.target, this.config.address)) {
+        return T.stopStates.otherAddress;
+      }
+      if (!this.config.password) {
         return T.stopStates.noPassword;
       }
       if (this.blocked()) return T.stopStates.passwordRefused;
@@ -1355,6 +1401,14 @@ export class RainMachineApp {
   /** `[connected, message, plain]`; `plain`: the summary without "Connected". */
   status() {
     const c = this.controller;
+    if (this.configFailed) {
+      // Asked again every 30 s; the stops still go with the configuration held.
+      return [false, this.withNotes(T.configUnreadable)];
+    }
+    if (!this.configRead) {
+      // Before the configuration: never "enter the address" (it may be there).
+      return [false, this.withNotes(T.waitingConfig)];
+    }
     if (!this.config.address) {
       if (this.config.credentialsInHost) {
         return [false, this.withNotes(T.hostCredentials)];
@@ -1660,6 +1714,17 @@ export class RainMachineApp {
     if (entry.seq !== this.protectSeq || this.stops.length > 0 || this.stopWorker) {
       throw this.refusal(ERRORS.stopMeanwhile);
     }
+    // A "Stop all" kept (until a read shows it applied), or a stop of this zone
+    // that never left: the start would undo it.
+    if (this.stopGuards.has('all')) {
+      throw this.refusal(ERRORS.stopAllKept);
+    }
+    if (
+      entry.uid !== undefined &&
+      this.stopGuards.get(stopKey('zone', entry.uid))?.written === false
+    ) {
+      throw this.refusal(ERRORS.stopZoneKept);
+    }
     if (this.paused) {
       const wait = age(this.pausedUntil - this.mono());
       throw this.refusal(
@@ -1860,7 +1925,7 @@ export class RainMachineApp {
       return this.refusal(ERRORS.missing);
     }
     entry.before = zone.state;
-    const guarded = this.stopGuards.has(stopKey('zone', entry.uid)) || this.stopGuards.has('all');
+    const guarded = this.stopGuards.has(stopKey('zone', entry.uid));
     // Never "already so" while a stop is kept: the start is written, and lets the stop go.
     if (zone.state === RUN_STATES.RUNNING && !this.isPending(entry.uid) && !guarded) {
       return 'done';
@@ -1914,10 +1979,16 @@ export class RainMachineApp {
     this.followUp();
     // The read back alone confirms them.
     const answerBy = Math.min(...written.map((e) => e.answerBy));
-    await this.sleep(
-      Math.min(TIMINGS.applyWait, answerBy - TIMINGS.commandMinRequest - this.mono()),
-      holder.signal,
-    );
+    const wait = this.readBackWait(answerBy);
+    if (wait === undefined) {
+      // No time left for a read back: answered now, the follow-up reads check.
+      for (const entry of written) {
+        this.markPending(entry.uid);
+        entry.settle(this.refusal(ERRORS.sentUnconfirmed('timeout')));
+      }
+      return;
+    }
+    await this.sleep(wait, holder.signal);
     let zones;
     const backStart = this.mono();
     try {
@@ -1940,7 +2011,13 @@ export class RainMachineApp {
     }
     for (const entry of written) {
       const back = zones.get(entry.uid);
-      if (back?.state === RUN_STATES.RUNNING || back?.state === RUN_STATES.QUEUED) {
+      const queuedBefore = entry.before === RUN_STATES.QUEUED;
+      // Queued before and after: taken only when its remaining time is the length written.
+      const queuedNow =
+        back?.state === RUN_STATES.QUEUED &&
+        (!queuedBefore ||
+          (back.remaining !== undefined && Math.abs(back.remaining - entry.seconds) <= 5));
+      if (back?.state === RUN_STATES.RUNNING || queuedNow) {
         // Watering, or queued by the controller behind another zone (it waters
         // one at a time): the start is taken, for the length written.
         this.pending.delete(entry.uid);
@@ -1975,6 +2052,7 @@ export class RainMachineApp {
       entry.settle(this.refusal(ERRORS.missing));
       return false;
     }
+    entry.seconds = seconds;
     this.logger.info(`RainMachine: start zone ${uid} for ${seconds / 60} min`);
     try {
       await this.call(address, {
@@ -2169,15 +2247,18 @@ export class RainMachineApp {
     this.stopWorker = (async () => {
       try {
         while (this.stops.length > 0) {
-          const job = this.stops[0];
-          job.running = true;
+          // Every stop waiting for the same address goes in this turn: all
+          // written first, one read back for all of them.
+          const target = this.stops[0].target;
+          const batch = this.stops.filter((j) => sameAddress(j.target, target));
+          for (const job of batch) job.running = true;
           try {
-            await this.sendStop(job);
+            await this.sendStops(batch);
           } catch (err) {
             this.logger.warn(`RainMachine: stop failed: ${err.message}`);
-            job.resolve({ error: this.refusal(ERRORS.stopPending) });
+            for (const job of batch) job.resolve({ error: this.refusal(ERRORS.stopPending) });
           }
-          this.stops.shift();
+          this.stops = this.stops.filter((j) => !batch.includes(j));
         }
       } finally {
         this.stopWorker = undefined;
@@ -2283,24 +2364,136 @@ export class RainMachineApp {
     }
   }
 
-  /** The stops a start of zone `uid` undoes: that zone's, and "all". */
+  /**
+   * The stop a start of zone `uid` undoes: that zone's own, already sent
+   * (a start is refused while it never left). "Stop all" is never let go by
+   * a start (it is about the programs and the other zones too).
+   */
   dropStopsUndoneBy(uid, reason) {
-    for (const key of [stopKey('zone', uid), 'all']) {
-      const guard = this.stopGuards.get(key);
-      if (guard) this.dropStopGuard(guard, reason);
-    }
+    const guard = this.stopGuards.get(stopKey('zone', uid));
+    if (guard?.written) this.dropStopGuard(guard, reason);
   }
 
   /**
-   * One stop: the stop request without a read first (a login when there is
-   * no token), then the read back that alone confirms it. Unreachable, cut,
-   * silent or a 5xx: tried again every 250 ms until 3 s after the click (the
-   * write is idempotent). Not confirmed: kept (in /data) and checked every
-   * 15 s.
+   * The wait before a read back that must end by `answerBy`: the time the
+   * controller needs to apply a write (500 ms), shortened so that the read
+   * itself still fits (twice the last exchange); undefined when it cannot fit
+   * at all (answered "without confirmation" at once, no connection opened).
    */
-  async sendStop(job) {
-    const { target, state } = job;
-    const retryUntil = Math.max(job.received, this.mono()) + TIMINGS.stopRetryFor;
+  readBackWait(answerBy) {
+    const left = answerBy - this.mono() - TIMINGS.commandMinRequest;
+    const need = Math.max(TIMINGS.commandMinRequest, this.exchangeMs ?? 0);
+    if (left < need) return undefined;
+    return Math.max(0, Math.min(TIMINGS.applyWait, left - 2 * need));
+  }
+
+  /**
+   * The stops waiting for one address: every one written first (no read
+   * before: a login when there is no token), each tried again every 250 ms
+   * until 3 s after its click on a failure that may not have reached the
+   * controller (the write is idempotent); the stops clicked meanwhile join
+   * the turn; then one read back that alone confirms them. Not confirmed:
+   * kept (in /data) and checked every 15 s.
+   */
+  async sendStops(jobs) {
+    const target = jobs[0].target;
+    const items = [];
+    const prepare = (list) => {
+      for (const job of list) items.push(this.prepareStop(job, target));
+    };
+    /** The stops clicked meanwhile for this address join this turn. */
+    const adopt = () => {
+      const late = this.stops.filter((j) => !j.running && sameAddress(j.target, target));
+      for (const job of late) job.running = true;
+      jobs.push(...late);
+      return late;
+    };
+    prepare(jobs);
+    // In /data before the first byte, so a restart sends them again; a save
+    // that fails or hangs never holds a stop back (200 ms at most).
+    await this.bounded(this.persistStops(), TIMINGS.stopSaveWait);
+    for (;;) {
+      const late = adopt();
+      if (late.length > 0) {
+        prepare(late);
+        await this.bounded(this.persistStops(), TIMINGS.stopSaveWait);
+      }
+      const round = items.filter((i) => !i.accepted && !i.final);
+      if (round.length === 0) break;
+      const holder = await this.lane.acquire('stop');
+      try {
+        for (const item of round) {
+          if (item.final) continue;
+          if (!(await this.writeStop(item, target, holder))) {
+            // The others cannot leave either (password, certificate, /data): kept, same reason.
+            for (const other of round) {
+              if (!other.accepted && !other.final) {
+                other.failure = item.failure;
+                other.final = true;
+              }
+            }
+            break;
+          }
+        }
+      } finally {
+        holder.release();
+      }
+      for (const item of items) {
+        if (!item.accepted && !item.final && this.mono() + TIMINGS.stopRetry >= item.retryUntil) {
+          item.final = true;
+        }
+      }
+      if (items.every((i) => i.accepted || i.final) && this.stops.every((j) => j.running)) break;
+      if (items.some((i) => !i.accepted && !i.final)) await this.sleep(TIMINGS.stopRetry);
+    }
+    // One read back for all the stops accepted, once the controller had time to apply them.
+    const accepted = items.filter((i) => i.accepted);
+    let back;
+    if (accepted.length > 0) {
+      const answerBy = Math.min(...accepted.map((i) => i.job.received)) + TIMINGS.commandAnswerBy;
+      const wait = this.readBackWait(answerBy);
+      if (wait !== undefined) {
+        const holder = await this.lane.acquire('stop');
+        try {
+          await this.sleep(wait, holder.signal);
+          back = await this.readStopState(
+            target,
+            holder,
+            answerBy,
+            accepted.some((i) => i.guard.kind !== 'zone'),
+          );
+        } catch (err) {
+          this.logger.debug(`RainMachine: read back of the stops failed (${errorReason(err)})`);
+        } finally {
+          holder.release();
+        }
+      }
+    }
+    let next = TIMINGS.stopCheck;
+    for (const item of items) {
+      const { guard, job } = item;
+      const decision =
+        back === undefined || !item.accepted ? undefined : this.decideStop(guard, back, Infinity);
+      if (this.stopGuards.get(guard.key) === guard) {
+        if (decision === 'done') this.dropStopGuard(guard, 'applied');
+        else if (decision === 'watch') next = Math.min(next, this.watchDelay(guard));
+      }
+      job.resolve(this.stopResult(item, decision, back));
+    }
+    // Armed before /data is written, never awaited: a hung disk never stops
+    // the checks nor holds the next click behind these.
+    if (this.stopGuards.size > 0) {
+      this.armStopCheck(next);
+      this.persistStops().catch(() => {});
+    }
+    if (items.some((i) => i.job.state.written)) {
+      this.followUp();
+    }
+    this.updateStatus().catch(() => {});
+  }
+
+  /** The guard of a stop clicked, renewed for this click (its resends from 0); its turn item. */
+  prepareStop(job, target) {
     let guard = this.stopGuards.get(job.key);
     if (guard && !sameAddress(guard.target, target)) {
       this.dropStopGuard(guard, 'a stop to another address');
@@ -2316,104 +2509,94 @@ export class RainMachineApp {
     // A start that left less than 90 s before this click may still land: watched,
     // even when no byte of this stop leaves.
     guard.watchUntil = Math.max(guard.watchUntil, this.lastStartFor(guard) + TIMINGS.pendingFor);
-    // In /data before the first byte, so a restart sends it again; a save that
-    // fails or hangs never holds the stop back (200 ms at most).
-    await this.bounded(this.persistStops(), TIMINGS.stopSaveWait);
-    let back;
-    let failure;
     this.logger.info(`RainMachine: stop (${guard.key})`);
-    for (;;) {
-      const holder = await this.lane.acquire('stop');
-      try {
-        await this.call(target, {
-          method: 'POST',
-          path: this.stopPath(guard),
-          body: this.stopBody(guard),
-          timeoutMs: Math.max(TIMINGS.stopRetry, retryUntil - this.mono()),
-          signal: holder.signal,
-          login: 'click',
-          beforeSend: () => {
-            state.written = true;
-            const at = this.mono();
-            this.lastSentAt = at;
-            if (this.stopGuards.get(guard.key) === guard) {
-              guard.written = true;
-              guard.sentAt = at;
-              // A start that left shortly before may land after this stop.
-              guard.watchUntil = Math.max(
-                guard.watchUntil,
-                this.lastStartFor(guard) + TIMINGS.pendingFor,
-              );
-            }
-          },
-        });
-        failure = undefined;
-        // Read back once the controller had time to apply it (within the ack budget).
-        await this.sleep(
-          Math.min(TIMINGS.applyWait, job.received + TIMINGS.commandAnswerBy - 800 - this.mono()),
-        );
-        try {
-          back = await this.readStopState(
-            target,
-            holder,
-            job.received + TIMINGS.commandAnswerBy,
-            guard.kind !== 'zone',
-          );
-        } catch (err) {
-          this.logger.debug(`RainMachine: read back of the stop failed (${errorReason(err)})`);
-        }
-        break;
-      } catch (err) {
-        failure = err;
-        this.noteStopRefused(guard, err);
-      } finally {
-        holder.release();
-      }
-      if (!transient(failure) || this.mono() + TIMINGS.stopRetry >= retryUntil) {
-        break;
-      }
-      await this.sleep(TIMINGS.stopRetry);
+    return {
+      job,
+      guard,
+      retryUntil: Math.max(job.received, this.mono()) + TIMINGS.stopRetryFor,
+      failure: undefined,
+      accepted: false,
+      final: false,
+    };
+  }
+
+  /**
+   * One write of a stop clicked. False when the others cannot leave either
+   * (password, certificate, /data); a failure that may not have reached the
+   * controller is tried again in the next round (until 3 s after the click).
+   */
+  async writeStop(item, target, holder) {
+    const { guard, job } = item;
+    try {
+      await this.call(target, {
+        method: 'POST',
+        path: this.stopPath(guard),
+        body: this.stopBody(guard),
+        // A whole exchange may take until the answer of the click (4.3 s): a slow
+        // controller still gets the stop, never cut by the 3 s of the retries.
+        timeoutMs: Math.max(
+          TIMINGS.stopRetry,
+          job.received + TIMINGS.commandAnswerBy - 200 - this.mono(),
+        ),
+        signal: holder.signal,
+        login: 'click',
+        beforeSend: () => {
+          job.state.written = true;
+          const at = this.mono();
+          this.lastSentAt = at;
+          if (this.stopGuards.get(guard.key) === guard) {
+            guard.written = true;
+            guard.sentAt = at;
+            // A start that left shortly before may land after this stop.
+            guard.watchUntil = Math.max(
+              guard.watchUntil,
+              this.lastStartFor(guard) + TIMINGS.pendingFor,
+            );
+          }
+        },
+      });
+      item.accepted = true;
+      item.failure = undefined;
+      return true;
+    } catch (err) {
+      item.failure = err;
+      this.noteStopRefused(guard, err);
+      if (!transient(err)) item.final = true;
+      return ![
+        ERROR_KINDS.AUTH,
+        ERROR_KINDS.NO_PASSWORD,
+        ERROR_KINDS.CERTIFICATE,
+        ERROR_KINDS.STORAGE,
+      ].includes(err.kind);
     }
-    const decision = back === undefined ? undefined : this.decideStop(guard, back, Infinity);
-    const confirmed = decision === 'done' || decision === 'watch';
-    if (this.stopGuards.get(guard.key) === guard) {
-      if (decision === 'done') {
-        this.dropStopGuard(guard, 'applied');
-      } else {
-        // Armed before /data is written, never awaited: a hung disk never stops
-        // the checks nor holds the next click behind this one.
-        this.armStopCheck(decision === 'watch' ? this.watchDelay(guard) : undefined);
-        this.persistStops().catch(() => {});
-      }
+  }
+
+  /** The answer to the click of a stop. */
+  stopResult({ guard, job, failure }, decision, back) {
+    if (decision === 'done' || decision === 'watch') {
+      this.logger.info(`RainMachine: stop ${guard.key} confirmed by the controller`);
+      return {};
     }
-    if (state.written) {
-      this.followUp();
-    }
-    let result;
-    if (confirmed) {
-      this.logger.info('RainMachine: stop confirmed by the controller');
-      result = {};
-    } else if (failure) {
+    if (failure) {
       const reason = errorReason(failure);
-      this.logger.warn(`RainMachine: stop failed (${reason})`);
+      this.logger.warn(`RainMachine: stop ${guard.key} failed (${reason})`);
       if (failure.kind === ERROR_KINDS.NO_PASSWORD) {
-        result = {
+        return {
           error: this.refusal(failure.blocked ? ERRORS.stopPasswordRefused : ERRORS.stopNoPassword),
         };
-      } else if (failure.kind === ERROR_KINDS.AUTH) {
-        result = { error: this.refusal(ERRORS.stopPasswordRefused) };
-      } else if (failure.kind === ERROR_KINDS.CERTIFICATE) {
-        result = { error: this.refusal(ERRORS.stopCertificate) };
-      } else if (!state.written) {
-        result = { error: this.refusal(ERRORS.stopNotSent(reason)) };
-      } else {
-        result = { error: this.refusal(ERRORS.stopSentUnconfirmed(reason)) };
       }
-    } else {
-      result = { error: this.refusal(back ? ERRORS.stopNotApplied : ERRORS.stopUnconfirmed) };
+      if (failure.kind === ERROR_KINDS.AUTH) {
+        return { error: this.refusal(ERRORS.stopPasswordRefused) };
+      }
+      if (failure.kind === ERROR_KINDS.CERTIFICATE) {
+        return { error: this.refusal(ERRORS.stopCertificate) };
+      }
+      if (!job.state.written) {
+        return { error: this.refusal(ERRORS.stopNotSent(reason)) };
+      }
+      return { error: this.refusal(ERRORS.stopSentUnconfirmed(reason)) };
     }
-    this.updateStatus().catch(() => {});
-    job.resolve(result);
+    return { error: this.refusal(back ? ERRORS.stopNotApplied : ERRORS.stopUnconfirmed) };
   }
 
   /** The identity, the zones and (when asked) the programs, on the line held, within `until`. */
@@ -2445,13 +2628,16 @@ export class RainMachineApp {
     return this.stops.length > 0 || Boolean(this.stopWorker) || this.starting;
   }
 
-  /** Whether a stop can try to leave now: a password known for its address and not refused. */
+  /**
+   * Whether a stop can try to leave now: a password known for its address and
+   * not refused (a changed certificate is tried: `trust` refuses it before any
+   * byte, and the pinned one back lets the stop leave).
+   */
   canSend(guard) {
     return (
       Boolean(this.config.password) &&
       sameAddress(guard.target, this.config.address) &&
-      !this.blocked() &&
-      !(this.memory.refusedPin && sameAddress(this.memory.refusedPin, guard.target))
+      !this.blocked()
     );
   }
 
@@ -2583,9 +2769,7 @@ export class RainMachineApp {
     // Armed before /data is written (a hung disk never stops the checks). A
     // stop that cannot leave is checked again when that changes, and at the
     // next check otherwise.
-    if (outcome !== 'idle') {
-      this.armStopCheck(outcome === 'yield' ? SECOND : next);
-    }
+    this.armStopCheck(outcome === 'yield' ? SECOND : next);
     this.persistStops().catch(() => {});
     this.updateStatus().catch(() => {});
   }

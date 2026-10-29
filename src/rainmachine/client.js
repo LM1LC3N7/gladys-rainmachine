@@ -105,7 +105,7 @@ export class RainMachineClient {
    * right before the bytes leave. Marks a failure `sent` when the request may
    * have reached the controller.
    */
-  async once({ address, trust, method, path, body, until, now, signal, beforeSend }) {
+  async once({ address, trust, tls, method, path, body, until, now, signal, beforeSend }) {
     let sent = false;
     const left = () => Math.max(1, Math.round(until - now()));
     if (signal?.aborted) {
@@ -118,6 +118,7 @@ export class RainMachineClient {
         port: address.port,
         timeoutMs: left(),
         trust,
+        tls,
         method,
         path,
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -148,7 +149,7 @@ export class RainMachineClient {
   }
 
   /** Logs in with the password: the token, kept for `key`. Throws AUTH when refused. */
-  async login({ address, password, key, trust, until, now, signal }) {
+  async login({ address, password, key, trust, tls, until, now, signal }) {
     if (!password) {
       throw new ControllerError(ERROR_KINDS.NO_PASSWORD, 'No password', { notSent: true });
     }
@@ -156,6 +157,7 @@ export class RainMachineClient {
     const res = await this.once({
       address,
       trust,
+      tls,
       method: 'POST',
       path: PATHS.login,
       body: { pwd: password, remember: 1 },
@@ -189,6 +191,7 @@ export class RainMachineClient {
     password,
     key,
     trust,
+    tls,
     method = 'GET',
     path,
     body,
@@ -199,7 +202,7 @@ export class RainMachineClient {
     onLogin,
   }) {
     const until = now() + timeoutMs;
-    const base = { address, trust, until, now, signal };
+    const base = { address, trust, tls, until, now, signal };
     let fresh = false;
     if (!this.hasToken(key)) {
       await this.login({ ...base, password, key });

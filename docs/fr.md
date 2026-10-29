@@ -53,9 +53,16 @@ première connexion (son empreinte SHA-256 gardée dans `/data` avant que le
 mot de passe parte). S'il change plus tard (programmateur réinitialisé ou
 remplacé), rien ne lui est envoyé, le statut affiche la nouvelle empreinte,
 et le bouton **Faire confiance au nouveau certificat** la prend en deux clics
-(à 3 s à 5 min d'intervalle). Un programmateur de première génération ne
-parle qu'un vieux TLS : l'intégration l'accepte, l'épingle garantit le
-programmateur.
+(à 3 s à 5 min d'intervalle). La connexion est en TLS moderne (1.2 ou plus).
+C'est seulement quand un programmateur le refuse à sa **première**
+connexion (une première génération ne parle que TLS 1.0 avec de vieilles
+suites TLS RSA) que la poignée de main ancienne est utilisée (TLS 1.0,
+niveau de sécurité 0, renégociation ancienne, comme regenmaschine), et
+l'épingle s'en souvient : un programmateur épinglé en TLS moderne n'est plus
+jamais contacté en TLS ancien. Avec une première génération, l'échange n'a
+pas de confidentialité persistante (échange de clés RSA) et une clé de
+certificat faible est acceptée puis épinglée : gardez-le sur un réseau de
+confiance.
 
 Un mot de passe refusé **n'est plus réessayé automatiquement** : enregistrez
 le bon, ou cliquez sur **Tester la connexion** (un essai par minute au plus).
@@ -84,7 +91,12 @@ statut de l'intégration dit lequel) :
   minute au plus) ; puis envoyé dès que le bon mot de passe est enregistré ou
   que **Tester la connexion** se connecte ;
 - **le certificat a changé** : envoyé dès qu'il est approuvé, ou que
-  l'épinglé revient ;
+  l'épinglé revient (essai toutes les 15 s, rien n'est envoyé à un autre
+  certificat) ;
+- **plusieurs arrêts cliqués à la fois** (une scène) : tous écrits d'abord,
+  l'un après l'autre, puis une seule relecture pour tous ; sur un
+  programmateur lent (900 ms par échange), le cinquième part environ 4,5 s
+  après le clic, et sa réponse dit « envoyé, sans confirmation » ;
 - **`/data` est illisible** (l'épingle est inconnue) ou la première épingle
   ne peut pas être gardée : rien n'est envoyé, nouvel essai toutes les 15 s.
 
@@ -98,8 +110,9 @@ puis gardé sans nouvel envoi et signalé dans le statut jusqu'à un nouveau
 clic. Seul un envoi accepté par le programmateur compte comme essai : un
 arrêt qui n'est jamais parti n'est jamais abandonné. Un arrêt gardé est
 levé quand une lecture le montre appliqué, ou quand un démarrage de cette
-zone cliqué ensuite dans Gladys est parti (ce démarrage est le souhait le
-plus récent), ou quand une lecture montre un autre programmateur (une autre
+zone cliqué ensuite dans Gladys est parti une fois l'arrêt lui-même parti (ce démarrage est le
+souhait le plus récent ; un démarrage ne lève jamais l'arrêt d'une autre
+zone, ni **Arrêter tout l'arrosage**, que seule une lecture lève), ou quand une lecture montre un autre programmateur (une autre
 adresse MAC) à son adresse. Jamais par le temps. Un démarrage envoyé moins de 90 s avant
 l'arrêt et appliqué après lui est contré. Une fois un arrêt vu appliqué, une
 zone démarrée depuis l'application RainMachine n'est pas contrée.
@@ -112,18 +125,28 @@ Chaque démarrage relit le programmateur juste avant (identité, zones), part
 dans les 3,5 s ou pas du tout, et arrose pendant la durée configurée (**1 à
 60 minutes**, 10 par défaut, bornée à nouveau avant l'envoi) : le
 programmateur ferme la vanne de lui-même à la fin. Il ne réussit que si la
-relecture montre la zone en arrosage ; « en file » quand le programmateur l'a
-mise derrière une autre zone, « envoyé, pas encore appliqué » ou « envoyé,
-sans confirmation » sinon (puis lectures à 5 et 20 s).
+relecture montre la zone en arrosage, ou mise en file par le programmateur
+derrière une autre zone (il arrose une zone à la fois ; une zone déjà en
+file avant n'est confirmée que par un temps restant égal à la durée
+envoyée) ; « envoyé, pas encore appliqué » ou « envoyé, sans confirmation »
+sinon (puis lectures à 5 et 20 s). La relecture attend moins quand la
+réponse au clic (4,3 s) approche, et n'est pas tentée quand elle ne tient
+plus.
 
-Une scène qui démarre plusieurs zones à la fois : une lecture pour toutes,
-puis un envoi chacune, l'un après l'autre ; sur un programmateur lent, un
-démarrage qui ne peut pas partir dans les 3,5 s de son clic est refusé, rien
-envoyé.
+Une scène qui démarre plusieurs zones à la fois : une lecture pour toutes
+(identité, zones), puis un envoi chacune, l'un après l'autre, puis une
+relecture. À 500 ms par échange, 5 zones sont envoyées et confirmées en
+4,1 s ; à 900 ms, seules les deux premières peuvent partir dans les 3,5 s
+(7 échanges pour 5 zones, environ 6,3 s) : les autres sont refusées, rien
+envoyé. Gladys poursuit la scène ; une scène en colonnes successives les
+démarre toutes.
 
 Refusé aussi : une zone inactive, une zone que le programmateur n'a plus, un
 autre programmateur à l'adresse, pendant une pause 429/5xx, avec un mot de
-passe refusé, avant la lecture de la configuration, ou pendant un arrêt en cours.
+passe refusé, avant la lecture de la configuration, pendant un arrêt en cours, tant que
+**Arrêter tout l'arrosage** est gardé (jusqu'à ce qu'une lecture montre
+toutes les zones et programmes arrêtés), ou tant qu'un arrêt de cette zone
+n'est pas encore parti.
 
 ## Eau utilisée (gardée)
 

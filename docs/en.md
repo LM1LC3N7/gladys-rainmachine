@@ -50,8 +50,14 @@ as the API wants it. The controller serves a **self-signed certificate**: it is
 before the password leaves). If it changes later (controller reset or
 replaced), nothing is sent to it, the status shows the new fingerprint, and
 the **Trust the new certificate** button takes it in two clicks (3 s to
-5 min apart). A first generation controller only speaks old TLS: the
-integration accepts it, the pin vouches for the controller.
+5 min apart). The connection is modern TLS (1.2 or later). Only when a
+controller refuses it at its **first** connection (a first generation only
+speaks TLS 1.0 with old RSA ciphers) is the legacy handshake used (TLS 1.0,
+security level 0, legacy renegotiation, as regenmaschine does), and the pin
+remembers it: a controller pinned in modern TLS is never spoken to in legacy
+TLS afterwards. With a first generation, the exchange has no forward secrecy
+(RSA key exchange) and a weak certificate key is accepted, then pinned: keep
+it on a trusted network.
 
 A refused password is **not tried again automatically**: save the right one,
 or click **Test the connection** (one try a minute at most).
@@ -79,7 +85,11 @@ which):
   most); then sent as soon as the right password is saved or **Test the
   connection** logs in;
 - **the certificate changed**: sent as soon as it is trusted, or the pinned
-  one is back;
+  one is back (tried every 15 s, nothing is sent to another certificate);
+- **several stops clicked at once** (a scene): all written first, one after
+  the other, then one read back for all; on a slow controller (900 ms an
+  exchange) the fifth leaves about 4.5 s after the click, and its answer says
+  "sent, without confirmation";
 - **`/data` cannot be read** (the pin is unknown) or the first pin cannot be
   saved: nothing is sent, tried again every 15 s.
 
@@ -92,7 +102,9 @@ checks, 3 times at most once the controller accepted it, then kept without
 new writes and said in the status until a new click. Only a write the
 controller accepted counts as a try: a stop that never left is never given
 up. A kept stop is let go when a read shows it applied, or when a start of
-that zone clicked in Gladys afterwards left (that start is the newer wish),
+that zone clicked in Gladys afterwards left, once the stop itself left (that
+start is the newer wish; a start never lets go the stop of another zone, nor
+**Stop all**, which a read alone lets go),
 or when a read shows another controller (another MAC address) at its address.
 Never by time. A start sent less than 90 s before the stop that lands after
 it is countered. Once a stop is seen applied, a zone started from the
@@ -105,17 +117,25 @@ Off by default: turn on **Allow watering**. It is a button, never a switch (a
 right before (identity, zones), leaves within 3.5 s or not at all, and waters
 for the configured length (**1 to 60 minutes**, 10 by default, bounded again
 before the write): the controller closes the valve by itself at the end. It
-succeeds only when the read back shows the zone watering; "queued" when the
-controller queued it behind another zone, "sent, not applied yet" or "sent,
-without confirmation" otherwise (then reads at 5 and 20 s).
+succeeds only when the read back shows the zone watering, or queued by the
+controller behind another zone (it waters one at a time; a zone already
+queued before is confirmed only by a remaining time equal to the length
+written); "sent, not applied yet" or "sent, without confirmation" otherwise
+(then reads at 5 and 20 s). The read back waits less when the answer to the
+click (4.3 s) comes near, and is not tried when it cannot fit.
 
-A scene starting several zones at once: one read for all of them, then one
-write each, one at a time; on a slow controller, a start that cannot leave
-within 3.5 s of its click is refused, nothing sent.
+A scene starting several zones at once: one read for all of them (identity,
+zones), then one write each, one at a time, then one read back. At 500 ms an
+exchange, 5 zones are written and confirmed within 4.1 s; at 900 ms only the
+first two can leave within 3.5 s (7 exchanges for 5 zones, about 6.3 s): the
+others are refused, nothing sent. Gladys goes on with the scene; a scene of
+successive columns starts them all.
 
 Also refused: an inactive zone, a zone the controller no longer has, another
 controller at the address, during a 429/5xx pause, with a refused password,
-before the configuration is read, or while a stop is on its way.
+before the configuration is read, while a stop is on its way, while **Stop
+all** is kept (until a read shows every zone and program stopped), or while a
+stop of that zone has not left yet.
 
 ## Water used (guarded)
 

@@ -29,3 +29,11 @@ the notes of the version's GitHub Release.
 - Starting a zone behind "Allow watering" (off by default), for 1 to 60
   minutes, decided on a fresh read and confirmed by a read back.
 - "Test the connection" and "Trust the new certificate" (two clicks).
+
+### Changed
+
+- Review r1: a hung /data never holds a read, a configuration nor a kept
+  stop; "Stop all" is never let go by a start (starts are refused while it is
+  kept); stops clicked together are all written first, then read back once;
+  modern TLS first, the legacy handshake only for a controller that refuses it
+  at its first connection (kept with the pin).

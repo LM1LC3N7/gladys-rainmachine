@@ -153,7 +153,8 @@ function normalizeCounter(raw) {
 function normalizePin(raw) {
   const address = addressOf(raw);
   const fingerprint = normalizeFingerprint(raw?.fingerprint);
-  return address && fingerprint ? { ...address, fingerprint } : null;
+  // `legacy`: the controller took only the legacy TLS handshake at its first connection.
+  return address && fingerprint ? { ...address, fingerprint, legacy: raw.legacy === true } : null;
 }
 
 /**

@@ -77,6 +77,8 @@ export function fakeRainMachine({ timers = globalThis, latencyMs = 0, applyDelay
     flow: { useFlowSensor: true, clicks: 4000, perM3: 1000 },
     /** Paths answering `statusCode` 13 (an unknown call, as a first generation). */
     unknown: new Set(),
+    /** Failures for the next requests of one 'METHOD path', in order. */
+    failFor: new Map(),
     /** Failures for the next requests, in order. */
     failNext: [],
     /** Failure of every request while set (e.g. 'unreachable'). */
@@ -90,6 +92,8 @@ export function fakeRainMachine({ timers = globalThis, latencyMs = 0, applyDelay
     startDelayMs: 0,
     /** A write answered that long after it arrived (the request already received). */
     writeDelayMs: 0,
+    /** Awaited during the handshake of each exchange: `(method, path) => Promise`. */
+    duringHandshake: undefined,
     /** Called with each write as it arrives: `(write) => void`. */
     onWrite: undefined,
     /** The stops are answered OK but not applied (a controller that ignores them). */
@@ -231,12 +235,20 @@ export function fakeRainMachine({ timers = globalThis, latencyMs = 0, applyDelay
     dev.open += 1;
     dev.peak = Math.max(dev.peak, dev.open);
     try {
-      const failure = dev.failNext.length > 0 ? dev.failNext.shift() : dev.down;
+      const forPath = dev.failFor.get(`${method} ${path.split('?')[0]}`);
+      const failure =
+        forPath?.length > 0
+          ? forPath.shift()
+          : dev.failNext.length > 0
+            ? dev.failNext.shift()
+            : dev.down;
       if (failure === 'unreachable' || host !== HOST || port !== 8080) {
         await delay(0, h);
         throw new ControllerError(ERROR_KINDS.UNREACHABLE, 'Unreachable: ECONNREFUSED');
       }
       await delay(dev.latencyMs, h);
+      // During the handshake (before the bytes of the request): the test may act.
+      await dev.duringHandshake?.(method, path.split('?')[0]);
       await trust(dev.fingerprint);
       if (h.closed) {
         throw new ControllerError(ERROR_KINDS.ABORTED, 'Session given up', { notSent: true });
