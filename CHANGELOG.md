@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-29
+
 ### Added
 
 - RainMachine sprinkler controllers read over their local HTTPS API (port
@@ -40,3 +42,6 @@ the notes of the version's GitHub Release.
 - Review r2: nothing pinned nor sent while /data is still being read;
   "Stop all" let go by two reads of every zone dry when the programs cannot
   be read; the TLS fallback only on a TLS alert.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-rainmachine/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-rainmachine/releases/tag/v0.1.1

@@ -1,6 +1,6 @@
 {
   "name": "gladys-rainmachine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for RainMachine sprinkler controllers over their local HTTPS API (pinned certificate): zones, programs, restrictions, flow sensor; starting a zone off by default and bounded, stops never held back. Unofficial, not affiliated with RainMachine.",
   "type": "module",
