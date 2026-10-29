@@ -1,177 +1,190 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "RainMachine",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "RainMachine sprinkler controllers over their local HTTPS API: zones, programs, stops.",
+    "fr": "Programmateurs d'arrosage RainMachine par leur API HTTPS locale : zones, programmes, arrêts."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-rainmachine:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-rainmachine/main/cover.png",
+  "categories": ["appliances"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your RainMachine controller",
+        "fr": "Votre programmateur RainMachine"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Shows your RainMachine sprinkler controller (Mini-8, Touch HD, Pro, HD-12/16) in Gladys through its local API, without the RainMachine cloud: zones watering and time remaining, programs running, weather restrictions, water used (flow sensor). Give the controller a fixed address in your router, enter it with the password of the controller, save, then add the devices from the Discovery tab. Stopping a zone, a program or all watering is always possible from Gladys; starting a zone only if you allow it below. Never tested with a real device. Not affiliated with RainMachine.",
+        "fr": "Affiche votre programmateur d'arrosage RainMachine (Mini-8, Touch HD, Pro, HD-12/16) dans Gladys par son API locale, sans le cloud RainMachine : zones en arrosage et temps restant, programmes en cours, restrictions météo, eau utilisée (débitmètre). Donnez au programmateur une adresse fixe dans votre box, saisissez-la avec le mot de passe du programmateur, enregistrez, puis ajoutez les appareils depuis l'onglet Découverte. Arrêter une zone, un programme ou tout l'arrosage est toujours possible depuis Gladys ; démarrer une zone seulement si vous l'autorisez ci-dessous. Jamais testé avec un vrai appareil. Sans lien avec RainMachine."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-rainmachine/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-rainmachine/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "host",
+      "type": "string",
+      "label": {
+        "en": "IP address of the controller",
+        "fr": "Adresse IP du programmateur"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
+      "description": {
+        "en": "An IPv4 address or a host name, optionally followed by a port (8080 by default). The controller is reached over HTTPS; its certificate is pinned at the first connection.",
+        "fr": "Une adresse IPv4 ou un nom d'hôte, éventuellement suivi d'un port (8080 par défaut). Le programmateur est joint en HTTPS ; son certificat est épinglé à la première connexion."
+      },
+      "placeholder": {
+        "en": "192.168.1.60",
+        "fr": "192.168.1.60"
+      },
       "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "default": ""
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "Password of the controller",
+        "fr": "Mot de passe du programmateur"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "description": {
+        "en": "The password of the controller (the one asked by the RainMachine app or its web page). Kept by Gladys in its database, never shown again, sent only to the controller, over HTTPS, and only once its certificate is checked against the one pinned at the first connection. A refused password is not tried again automatically: save another one or click \"Test the connection\".",
+        "fr": "Le mot de passe du programmateur (celui que demandent l'application RainMachine ou sa page web). Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement au programmateur, en HTTPS, et seulement une fois son certificat comparé à celui épinglé à la première connexion. Un mot de passe refusé n'est plus réessayé automatiquement : enregistrez-en un autre ou cliquez sur « Tester la connexion »."
+      },
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "allow_watering",
+      "type": "boolean",
+      "label": {
+        "en": "Allow watering",
+        "fr": "Autoriser l'arrosage"
+      },
+      "description": {
+        "en": "Off by default. On: the \"Start watering\" button of a zone opens its valve for the length below. Off: it refuses every command. The stops (a zone, a program, all watering) always work.",
+        "fr": "Désactivé par défaut. Activé : le bouton « Démarrer l'arrosage » d'une zone ouvre sa vanne pour la durée ci-dessous. Désactivé : il refuse toute commande. Les arrêts (une zone, un programme, tout l'arrosage) fonctionnent toujours."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "watering_minutes",
+      "type": "number",
+      "label": {
+        "en": "Watering length (minutes)",
+        "fr": "Durée d'arrosage (minutes)"
+      },
+      "description": {
+        "en": "How long a zone started from Gladys waters, 1 to 60 minutes (10 by default). The controller closes the valve by itself at the end.",
+        "fr": "Durée d'arrosage d'une zone démarrée depuis Gladys, de 1 à 60 minutes (10 par défaut). Le programmateur ferme la vanne de lui-même à la fin."
+      },
+      "required": false,
+      "default": 10,
+      "min": 1,
+      "max": 60
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": {
+        "en": "Refresh interval (seconds)",
+        "fr": "Intervalle de rafraîchissement (secondes)"
+      },
+      "description": {
+        "en": "How often the controller is read, 15 to 600 seconds (60 by default).",
+        "fr": "Fréquence de lecture du programmateur, de 15 à 600 secondes (60 par défaut)."
+      },
+      "required": false,
+      "default": 60,
+      "min": 15,
+      "max": 600
+    },
+    {
+      "key": "language",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms des fonctionnalités"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The language of the names given to the features of the devices.",
+        "fr": "La langue des noms donnés aux fonctionnalités des appareils."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "description": {
+        "en": "Reads the controller once (never sooner than the refresh interval; one login a minute at most when the password was refused) and shows its state.",
+        "fr": "Lit le programmateur une fois (jamais avant l'intervalle de rafraîchissement ; une connexion par minute au plus quand le mot de passe a été refusé) et affiche son état."
+      },
       "timeout_seconds": 30
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "trust_certificate",
+      "label": {
+        "en": "Trust the new certificate",
+        "fr": "Faire confiance au nouveau certificat"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
       "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+        "en": "When the certificate of the controller changed (reset, replaced), nothing is sent to it. First click: shows the new fingerprint. Second click 3 s to 5 min later: pins exactly that one.",
+        "fr": "Quand le certificat du programmateur a changé (réinitialisé, remplacé), rien ne lui est envoyé. Premier clic : affiche la nouvelle empreinte. Second clic 3 s à 5 min après : épingle exactement celle-là."
       },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
+      "timeout_seconds": 30
+    },
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
+      "key": "accept_held_counter",
+      "label": {
+        "en": "Accept the held water counter",
+        "fr": "Accepter le compteur d'eau retenu"
       },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "description": {
+        "en": "A drop or a jump of the water counter (flow sensor reset, controller replaced) is held back, never published alone. First click: shows it. Second click 3 s to 5 min later: takes exactly that value.",
+        "fr": "Une baisse ou un saut du compteur d'eau (débitmètre remis à zéro, programmateur remplacé) est retenu, jamais publié seul. Premier clic : l'affiche. Second clic 3 s à 5 min après : prend exactement cette valeur."
+      },
+      "timeout_seconds": 30
     }
   ]
 }

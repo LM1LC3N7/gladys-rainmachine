@@ -1,67 +1,154 @@
-# Template de démonstration
+# RainMachine pour Gladys
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+Affiche votre programmateur d'arrosage **RainMachine** (Mini-8, Touch HD,
+Pro, HD-12/16, de la première à la troisième génération) dans Gladys par son
+**API HTTPS locale** : sans le cloud RainMachine (l'« accès à distance »
+n'est pas utilisé), directement sur votre réseau.
+
+> **Jamais testé avec un vrai appareil.** Sans lien avec RainMachine.
+> L'intégration suit regenmaschine, la bibliothèque RainMachine de Home
+> Assistant, et ses captures de test. Une mise à jour du firmware peut changer
+> l'API.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+Un appareil pour le programmateur (repéré par son adresse MAC, pas par son
+adresse IP), un par zone **active** et un par programme :
 
-## Configuration
+| Appareil      | Fonctionnalité                                                                              | Contenu                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Programmateur | Arrosage en cours                                                                           | Oui / non (une zone arrose)                                                     |
+| Programmateur | Report pour pluie, protection gel, capteur de pluie, restrictions horaire, du mois, du jour | Oui / non (les restrictions météo en vigueur ; pas sur une première génération) |
+| Programmateur | Eau utilisée (débitmètre)                                                                   | En litres, le compteur du débitmètre, gardé (voir plus bas)                     |
+| Programmateur | Arrêter tout l'arrosage                                                                     | Bouton, **toujours disponible**                                                 |
+| Zone          | Arrosage en cours                                                                           | Oui / non (une zone en file derrière une autre est « non » jusqu'à son départ)  |
+| Zone          | Temps restant                                                                               | En minutes                                                                      |
+| Zone          | Démarrer l'arrosage                                                                         | Bouton (seulement avec « Autoriser l'arrosage »)                                |
+| Zone          | Arrêter l'arrosage                                                                          | Bouton, **toujours disponible**                                                 |
+| Programme     | En cours                                                                                    | Oui / non                                                                       |
+| Programme     | Arrêter le programme                                                                        | Bouton, **toujours disponible**                                                 |
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+Gladys ne démarre jamais un programme : un programme arrose aussi longtemps
+que le programmateur le calcule (météo, ajustement saisonnier), ce que
+Gladys ne peut pas borner. Lecture toutes les 60 secondes par défaut (15 s à
+10 min), une requête à la fois. Les programmes, les restrictions, le
+débitmètre, le nom et les versions sont secondaires : quand l'un ne répond
+pas, les autres valeurs sont publiées quand même et le statut dit « Non lu
+cette fois : ... ».
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Installation
 
-## Actions
+1. Donnez au programmateur une adresse IP fixe dans votre box.
+2. Dans Gladys, installez l'intégration, saisissez l'adresse IP du
+   programmateur (éventuellement suivie d'un port, 8080 par défaut) et son
+   **mot de passe** (celui que demande l'application RainMachine).
+3. Enregistrez, puis ajoutez les appareils depuis l'onglet **Découverte**.
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+Le mot de passe est gardé par Gladys dans sa base, jamais réaffiché, envoyé
+seulement au programmateur, dans le corps de la connexion. Le jeton d'accès
+que rend le programmateur est gardé en mémoire seulement (jamais sur le
+disque) et envoyé avec chaque requête comme l'API le demande. Le
+programmateur sert un **certificat autosigné** : il est **épinglé** à la
+première connexion (son empreinte SHA-256 gardée dans `/data` avant que le
+mot de passe parte). S'il change plus tard (programmateur réinitialisé ou
+remplacé), rien ne lui est envoyé, le statut affiche la nouvelle empreinte,
+et le bouton **Faire confiance au nouveau certificat** la prend en deux clics
+(à 3 s à 5 min d'intervalle). Un programmateur de première génération ne
+parle qu'un vieux TLS : l'intégration l'accepte, l'épingle garantit le
+programmateur.
 
-## Scènes
+Un mot de passe refusé **n'est plus réessayé automatiquement** : enregistrez
+le bon, ou cliquez sur **Tester la connexion** (un essai par minute au plus).
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+## Les arrêts
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+**Arrêter l'arrosage** (une zone), **Arrêter le programme** et **Arrêter
+tout l'arrosage** (`watering/stopall`) ne dépendent ni de « Autoriser
+l'arrosage », ni d'une lecture ou d'un démarrage en cours (ils les
+interrompent), ni d'une pause après une erreur 429 ou 5xx, ni d'une lecture
+en échec. Un démarrage arrivé avant un arrêt et pas encore parti est
+abandonné.
 
-## Tableau de bord
+Un arrêt réussit quand la relecture montre la zone (le programme, toutes les
+zones et tous les programmes) sans arrosage. Sinon la réponse dit pourquoi,
+et l'arrêt est gardé dans `/data` et vérifié toutes les 15 s. Il ne part pas
+aussitôt, et reste gardé jusqu'à pouvoir partir, seulement dans ces cas (le
+statut de l'intégration dit lequel) :
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+- **le programmateur ne répond pas** : nouvel essai toutes les 250 ms
+  pendant 3 s, puis toutes les 15 s, sans limite de temps ;
+- **le mot de passe n'est pas encore connu** : juste après un redémarrage,
+  avant que Gladys donne la configuration (le mot de passe n'est jamais écrit
+  dans `/data`) : envoyé dès qu'elle arrive ;
+- **le mot de passe est refusé** : le clic tente une connexion (une par
+  minute au plus) ; puis envoyé dès que le bon mot de passe est enregistré ou
+  que **Tester la connexion** se connecte ;
+- **le certificat a changé** : envoyé dès qu'il est approuvé, ou que
+  l'épinglé revient ;
+- **`/data` est illisible** (l'épingle est inconnue) ou la première épingle
+  ne peut pas être gardée : rien n'est envoyé, nouvel essai toutes les 15 s.
 
-## Dépannage
+Il n'est refusé sans envoi que si aucune adresse de programmateur n'est
+connue, ou si la dernière lecture a montré un autre programmateur (une autre
+adresse MAC) à cette adresse.
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+Un arrêt envoyé mais **pas appliqué** (la zone arrose encore) est renvoyé par
+les vérifications, 3 fois au plus une fois accepté par le programmateur,
+puis gardé sans nouvel envoi et signalé dans le statut jusqu'à un nouveau
+clic. Seul un envoi accepté par le programmateur compte comme essai : un
+arrêt qui n'est jamais parti n'est jamais abandonné. Un arrêt gardé est
+levé quand une lecture le montre appliqué, ou quand un démarrage de cette
+zone cliqué ensuite dans Gladys est parti (ce démarrage est le souhait le
+plus récent), ou quand une lecture montre un autre programmateur (une autre
+adresse MAC) à son adresse. Jamais par le temps. Un démarrage envoyé moins de 90 s avant
+l'arrêt et appliqué après lui est contré. Une fois un arrêt vu appliqué, une
+zone démarrée depuis l'application RainMachine n'est pas contrée.
+
+## Démarrer l'arrosage (option)
+
+Désactivé par défaut : activez **Autoriser l'arrosage**. C'est un bouton,
+jamais un interrupteur (un « tout éteindre » n'atteint jamais une vanne).
+Chaque démarrage relit le programmateur juste avant (identité, zones), part
+dans les 3,5 s ou pas du tout, et arrose pendant la durée configurée (**1 à
+60 minutes**, 10 par défaut, bornée à nouveau avant l'envoi) : le
+programmateur ferme la vanne de lui-même à la fin. Il ne réussit que si la
+relecture montre la zone en arrosage ; « en file » quand le programmateur l'a
+mise derrière une autre zone, « envoyé, pas encore appliqué » ou « envoyé,
+sans confirmation » sinon (puis lectures à 5 et 20 s).
+
+Une scène qui démarre plusieurs zones à la fois : une lecture pour toutes,
+puis un envoi chacune, l'un après l'autre ; sur un programmateur lent, un
+démarrage qui ne peut pas partir dans les 3,5 s de son clic est refusé, rien
+envoyé.
+
+Refusé aussi : une zone inactive, une zone que le programmateur n'a plus, un
+autre programmateur à l'adresse, pendant une pause 429/5xx, avec un mot de
+passe refusé, avant la lecture de la configuration, ou pendant un arrêt en cours.
+
+## Eau utilisée (gardée)
+
+Quand un débitmètre est réglé dans le programmateur, **Eau utilisée** est son
+compteur en litres (ses impulsions divisées par ses impulsions par mètre
+cube ; l'application RainMachine affiche des gallons en unités US, l'API
+donne des mètres cubes). Compteur à vie, il passe par une **garde** :
+
+- 0 ou absent n'est pas publié ;
+- une hausse plausible (100 litres par minute en moyenne au plus) passe ;
+- une **baisse** (débitmètre remis à zéro, programmateur remplacé) ou un
+  **saut** est **retenu** : la dernière valeur reste, le statut l'affiche, la
+  retenue est gardée dans `/data`. Ni le temps ni la répétition ne la
+  confirment ;
+- le bouton **Accepter le compteur d'eau retenu** la prend en **deux
+  clics** : le premier affiche la valeur, le second (3 s à 5 min après) prend
+  exactement cette valeur (plus ce qui a pu couler depuis).
+
+## Bon à savoir
+
+- Le programmateur n'est pas relu avant l'intervalle : ni par **Tester la
+  connexion**, ni par une Découverte, une reconnexion à Gladys ou un
+  redémarrage (l'heure de la dernière lecture est gardée dans `/data`).
+  Seules les lectures qui suivent une commande (5 et 20 s) font exception.
+- Une valeur de plus de 2 minutes n'est pas envoyée comme nouvelle.
+- Rien de secret n'est écrit dans `/data` ni dans les journaux.
+- L'application RainMachine, ses programmes et la météo peuvent aussi changer
+  les zones : le dernier l'emporte.

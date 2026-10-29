@@ -1,76 +1,69 @@
 # CLAUDE.md
 
-Project rules for coding assistants (Claude Code reads this file) and for human
-contributors.
+Project rules for coding assistants (Claude Code reads this file) and for
+human contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
-[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
-its only runtime dependency. It started from the official JavaScript template.
+A Gladys Assistant **external integration** of type `device`: a Node.js
+service (Node 22+, ESM, no build step) in its own sandboxed Docker container,
+talking to Gladys through `@gladysassistant/integration-sdk` (v0.16). It reads
+a **RainMachine** sprinkler controller over its local HTTPS API (port 8080,
+the password of the controller, an access token in memory, the self-signed
+certificate pinned) and exposes the controller, its active zones and its
+programs as Gladys devices, with stop buttons and an optional start. Unofficial:
+not affiliated with RainMachine. Ported from regenmaschine 2024.3.0 (MIT), see
+THIRD_PARTY_NOTICES.md.
 
 ## Commands
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+npm test                                  # node --test --test-timeout=60000
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
-npm run format                            # Prettier, fix in place
+npm run audit                             # npm audit --omit=dev
+npm run cover                             # regenerates cover.png (800×534)
 npx github:GladysAssistant/integration-store .   # store admission checks
 ```
 
-The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
-Node 22 and 24, and builds the Docker image: run the three commands before
-pushing.
+On the maintainer's VM: `gi test`, `gi ci`.
 
 ## Architecture
 
-```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
-```
+See README.md ("How it works") and the header of each file in `src/`.
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
-- **The container rootfs is read-only.** Write only under `/data`, the one
-  writable volume. Never log tokens, passwords or API keys.
+- **Unofficial.** Every user-facing surface says it. Never the RainMachine logo.
+- **Keys are forever**: manifest keys (`host`, `password`, `allow_watering`,
+  `watering_minutes`, `poll_interval`, `language`, the actions
+  `test_connection`, `trust_certificate`, `accept_held_counter`), external id
+  types, the identity rule (the MAC), feature keys (`src/constants.js`).
+- **Secrets**: the password only in the login body, the token only in the
+  query string of a request over the pinned TLS; neither in a log, an error,
+  a status nor /data. A `secret` field is "kept by Gladys in its database,
+  never shown again", never "encrypted".
+- **TLS**: nothing written before the certificate matches the pin; the first
+  pin in /data before the password leaves; never learnt again without two
+  clicks.
+- **Starting a zone opens a valve**: off by default, never a switch, decided
+  on a fresh read, option checked again in `beforeSend`, length bounded 1 to
+  60 minutes before the write. **The stops are never held back** by the
+  option, a pause, a read or a start; the cases where one does not leave at
+  once are listed in the docs and in the header of `src/app.js`, and must
+  stay documented exactly. A stop that never left is never given up.
+- **Never read sooner than the interval** (restart included); 429/5xx are
+  persisted; a refused password is never retried automatically.
+- **Paths from regenmaschine only** (`PATHS` in `src/constants.js`).
+- **Read-only rootfs**: write nothing outside /data.
 - **Versions belong to the Release workflow** (Actions → Release). Never edit
-  `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
-- **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
-  in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
-  Never write a version heading: the Release workflow moves the section, and it
-  becomes the notes of the GitHub Release.
-- **Manifest.** Texts are multi-language objects `{ "en": ..., "fr": ... }`:
-  `label`, `description` and `placeholder` alike, never a plain string. The
-  catalog `description` holds 10 to 100 characters per language. A field the
-  older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
-- **User-facing text** is bilingual (English and French): action messages,
-  manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
-- **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+  `version` by hand (0.1.0 was set by hand once, see TODO.md).
+- **Changelog**: every user-visible change adds a line under `## [Unreleased]`.
+- **User-facing text** is bilingual, `docs/en.md` and `docs/fr.md` in sync.
+- **Tests never touch the network** but loopback servers (`test/http.test.js`).
+
+## CI and pushes
+
+- Group the commits and push **at most once a day**, unless the maintainer
+  explicitly asks otherwise: the GitHub Actions quota is limited.
