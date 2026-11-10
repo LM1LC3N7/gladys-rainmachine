@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Test helper: certificate serial numbers are always valid DER (a test failed about once in 100 runs).
+- Manifest test: compares the version with package.json instead of a hardcoded 0.1.0.
+
 ## [0.1.1] - 2026-10-29
 
 ### Added
